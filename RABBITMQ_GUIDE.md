@@ -1,1111 +1,1041 @@
-# 📨 Полный гайд по RabbitMQ и Messaging для начинающих
+# Полное руководство по RabbitMQ: Теория и практика
+
+Содержание:
+1. [Что такое RabbitMQ?](#что-такое-rabbitmq)
+2. [Основные компоненты](#основные-компоненты)
+3. [Как работает RabbitMQ](#как-работает-rabbitmq)
+4. [Типы Exchange](#типы-exchange)
+5. [Ваш проект - практический пример](#ваш-проект---практический-пример)
+6. [Архитектура сообщений](#архитектура-сообщений)
+7. [Коды примеров](#коды-примеров)
+8. [Бестпрактики и советы](#бестпрактики-и-советы)
 
 ---
 
-## 📖 Содержание
+## Что такое RabbitMQ?
 
-1. [Что такое Messaging и зачем это нужно?](#1-что-такое-messaging-и-зачем-это-нужно)
-2. [Основные понятия и термины](#2-основные-понятия-и-термины)
-3. [Что такое RabbitMQ?](#3-что-такое-rabbitmq)
-4. [Архитектура RabbitMQ](#4-архитектура-rabbitmq)
-5. [Типы Exchange (обменников)](#5-типы-exchange-обменников)
-6. [Паттерны обмена сообщениями](#6-паттерны-обмена-сообщениями)
-7. [Установка RabbitMQ](#7-установка-rabbitmq)
-8. [Spring Boot + RabbitMQ: Полная интеграция](#8-spring-boot--rabbitmq-полная-интеграция)
-9. [Продвинутые темы](#9-продвинутые-темы)
-10. [Типичные ошибки и их решения](#10-типичные-ошибки-и-их-решения)
-11. [Сравнение с другими брокерами](#11-сравнение-с-другими-брокерами)
-12. [Итоговая шпаргалка](#12-итоговая-шпаргалка)
+**RabbitMQ** - это брокер сообщений (message broker), написанный на языке Erlang. Это программное обеспечение, которое позволяет разным приложениям взаимодействовать между собой асинхронно через обмен сообщениями.
 
----
+### Зачем нужен RabbitMQ?
 
-## 1. Что такое Messaging и зачем это нужно?
+Представьте систему обработки изображений:
+- **Без RabbitMQ**: Приложение 1 должно напрямую вызвать Приложение 2, ждать ответа, и если Приложение 2 не работает - система падает или зависает.
+- **С RabbitMQ**: Приложение 1 отправляет сообщение в RabbitMQ и забывает о нём. RabbitMQ гарантирует, что сообщение будет доставлено Приложению 2, даже если тот сейчас не работает.
 
-### 🤔 Проблема: Синхронное взаимодействие
+### Основные преимущества:
 
-Представь, что ты заказываешь пиццу по телефону. Ты звонишь, ждёшь на линии, пока оператор не ответит, затем оформляете заказ, и только потом ты можешь заниматься своими делами. Это **синхронное** взаимодействие — ты **блокируешься** и ждёшь.
-
-В программировании, когда **Сервис A** вызывает **Сервис B** напрямую (например, через HTTP REST):
-
-```
-Сервис A ---[HTTP запрос]---> Сервис B
-Сервис A <--[HTTP ответ]---- Сервис B
-         (А ждёт весь это время!)
-```
-
-**Проблемы такого подхода:**
-- ❌ Если Сервис B упал — Сервис A тоже получит ошибку
-- ❌ Если Сервис B медленный — Сервис A зависает и ждёт
-- ❌ Если нагрузка выросла — оба сервиса страдают одновременно
-- ❌ Сервисы **тесно связаны** (tight coupling) — изменение одного требует изменения другого
-
-### ✅ Решение: Асинхронный обмен сообщениями
-
-Теперь представь, что ты заказываешь пиццу через приложение. Ты отправляешь заказ и **сразу идёшь по своим делам**. Когда пицца будет готова — тебе придёт уведомление. Это **асинхронное** взаимодействие.
-
-```
-Сервис A ---[сообщение]---> [📬 Брокер сообщений] ---[сообщение]---> Сервис B
-Сервис A продолжает работать!                         (когда готов)
-```
-
-**Преимущества:**
-- ✅ **Loose coupling** — сервисы не знают друг о друге
-- ✅ **Отказоустойчивость** — если Сервис B упал, сообщения накапливаются в очереди
-- ✅ **Масштабируемость** — можно добавить несколько экземпляров Сервиса B
-- ✅ **Пиковые нагрузки** — очередь выступает буфером
-
-### 🌍 Реальные примеры использования
-
-| Сценарий | Без Messaging | С Messaging |
-|----------|--------------|-------------|
-| Отправка email после регистрации | Пользователь ждёт пока письмо отправится | Задача кладётся в очередь, ответ мгновенный |
-| Обработка платежей | Медленный банковский API блокирует UI | Запрос в очереди, уведомление придёт позже |
-| Обновление нескольких сервисов | Нужно знать адреса всех сервисов | Публикуй событие — подписчики сами обработают |
-| Конвертация видео | Пользователь ждёт минуты | Загрузил → очередь → уведомление по готовности |
+✅ **Асинхронность** - приложения не ждут друг друга
+✅ **Отказоустойчивость** - если потребитель упал, сообщение сохранится
+✅ **Масштабируемость** - легко добавить новых потребителей
+✅ **Развязывание** - приложения не обязаны знать о друг друге
+✅ **Гибкость маршрутизации** - сложные логики доставки сообщений
 
 ---
 
-## 2. Основные понятия и термины
+## Основные компоненты
 
-### 📌 Ключевые термины
+RabbitMQ работает с четырьмя ключевыми компонентами:
 
-| Термин | Объяснение | Аналогия |
-|--------|-----------|---------|
-| **Message (Сообщение)** | Данные, которые передаются | Письмо |
-| **Producer (Производитель)** | Тот, кто отправляет сообщения | Отправитель письма |
-| **Consumer (Потребитель)** | Тот, кто получает и обрабатывает сообщения | Получатель письма |
-| **Queue (Очередь)** | Буфер, где хранятся сообщения | Почтовый ящик |
-| **Broker (Брокер)** | Посредник, который управляет очередями | Почтовое отделение |
-| **Exchange (Обменник)** | Маршрутизатор сообщений (специфично для RabbitMQ) | Сортировочный центр |
-| **Binding (Привязка)** | Правило: какой Exchange → какая Queue | Правило сортировки |
-| **Routing Key** | Метка сообщения для маршрутизации | Адрес на конверте |
-| **Acknowledgement (ACK)** | Подтверждение получения сообщения | Подпись о получении |
+### 1. **Producer (Производитель)**
 
-### 🔄 Жизненный цикл сообщения
+Это приложение, которое **создаёт и отправляет сообщения**.
 
 ```
-1. Producer создаёт сообщение
-        ↓
-2. Отправляет в Exchange с routing key
-        ↓
-3. Exchange по правилам (bindings) кладёт в Queue
-        ↓
-4. Consumer читает сообщение из Queue
-        ↓
-5. Consumer отправляет ACK (подтверждение)
-        ↓
-6. RabbitMQ удаляет сообщение из Queue
+PRODUCER ──→ RabbitMQ ──→ CONSUMER
 ```
+
+В вашем проекте: `producer` приложение - именно это Producer.
+Код: `MessageSender.java`
+
+**Характеристики:**
+- Создаёт сообщение
+- Отправляет в Exchange
+- Не знает о Consumer
+- Не нужно ждать подтверждения
 
 ---
 
-## 3. Что такое RabbitMQ?
+### 2. **Consumer (Потребитель)**
 
-**RabbitMQ** — это **брокер сообщений** с открытым исходным кодом. Он реализует протокол **AMQP** (Advanced Message Queuing Protocol).
+Это приложение, которое **получает и обрабатывает сообщения**.
 
-### 🐇 Почему именно RabbitMQ?
+```
+PRODUCER ──→ RabbitMQ ──→ CONSUMER
+```
 
-- **Надёжность** — сообщения не теряются даже при перезапуске
-- **Гибкость маршрутизации** — мощная система Exchange/Binding
-- **Простота** — удобный веб-интерфейс управления
-- **Зрелость** — используется в продакшене с 2007 года
-- **Интеграция** — отличная поддержка в Spring Framework
-- **Протоколы** — поддерживает AMQP, MQTT, STOMP
+В вашем проекте: `consumer` приложение - это Consumer.
+Код: `MessageListener.java`
 
-### 🏢 Кто использует RabbitMQ?
-
-Mozilla, Instagram, Reddit, Zalando и тысячи других компаний.
+**Характеристики:**
+- Слушает очередь (Queue)
+- Получает сообщение
+- Обрабатывает сообщение
+- Подтверждает обработку (ACK)
 
 ---
 
-## 4. Архитектура RabbitMQ
+### 3. **Exchange (Обменник)**
+
+Exchange - это **почтовое отделение** RabbitMQ.
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    RabbitMQ Broker                       │
-│                                                          │
-│  ┌──────────┐    ┌──────────────┐    ┌───────────────┐  │
-│  │ Virtual  │    │   Exchange   │    │    Queue      │  │
-│  │  Host    │───>│  (маршрутиз.)│───>│  (очередь)    │  │
-│  │ (vhost)  │    │              │    │               │  │
-│  └──────────┘    └──────────────┘    └───────────────┘  │
-│                        │                    │            │
-│                    Binding              Binding          │
-│                   (правила)            (правила)         │
-└─────────────────────────────────────────────────────────┘
-        ↑                                       ↓
-   Producer                               Consumer
-  (отправляет)                           (получает)
+Producer ──→ [Exchange] ──→ Queue ──→ Consumer
 ```
 
-### 🏠 Virtual Host (vhost)
+**Что он делает:**
+- Получает сообщения от Producer
+- Смотрит на Routing Key сообщения
+- Маршрутизирует (отправляет) сообщение в нужную Queue
 
-Виртуальный хост — это логическое разделение внутри одного RabbitMQ сервера. Как разные папки на диске. Используется для изоляции разных приложений или сред (dev/staging/prod).
+**Аналогия с почтой:**
+- `Exchange` = Почтовое отделение
+- `Routing Key` = Код потребителя почтовых услуг
+- `Queue` = Почтовый ящик получателя
 
-По умолчанию используется vhost `/`.
-
----
-
-## 5. Типы Exchange (обменников)
-
-Exchange принимает сообщение от Producer и решает, в какую очередь (или очереди) его положить.
-
-### 1️⃣ Direct Exchange (Прямой)
-
-**Принцип:** Сообщение идёт в очередь, чей binding key **точно совпадает** с routing key сообщения.
-
-```
-Producer --[routing_key="email"]--> Direct Exchange
-                                          |
-                          ┌───────────────┴──────────────┐
-                          ↓                               ↓
-                  [binding: "email"]              [binding: "sms"]
-                   Queue: email_queue              Queue: sms_queue
-                  ✅ Совпадение!                   ❌ Не совпадает
-```
-
-**Когда использовать:** Точная маршрутизация на конкретную очередь.
-
-### 2️⃣ Fanout Exchange (Широковещательный)
-
-**Принцип:** Сообщение рассылается **во все** привязанные очереди. Routing key **игнорируется**.
-
-```
-Producer --[любой ключ]--> Fanout Exchange
-                                  |
-                   ┌──────────────┼──────────────┐
-                   ↓              ↓              ↓
-              Queue_1          Queue_2         Queue_3
-           ✅ Получит       ✅ Получит      ✅ Получит
-```
-
-**Когда использовать:** Уведомления, которые должны получить все (например, "товар в наличии" — и email-сервис, и push-сервис, и SMS-сервис).
-
-### 3️⃣ Topic Exchange (Тематический)
-
-**Принцип:** Routing key — это строка с точками (`order.created.europe`). Поддерживает **шаблоны**:
-- `*` — заменяет **одно** слово
-- `#` — заменяет **ноль или более** слов
-
-```
-Producer --[routing_key="order.created.europe"]--> Topic Exchange
-                                                          |
-                              ┌───────────────────────────┤
-                              ↓                           ↓
-                   binding: "order.*.europe"     binding: "order.#"
-                   ✅ Совпадение!               ✅ Совпадение!
-                   
-                              ↓
-                   binding: "order.*.asia"
-                   ❌ Не совпадает
-```
-
-**Когда использовать:** Гибкая маршрутизация по категориям событий.
-
-### 4️⃣ Headers Exchange (По заголовкам)
-
-**Принцип:** Маршрутизация по **заголовкам** сообщения (ключ-значение), а не по routing key.
-
-**Когда использовать:** Сложная маршрутизация по множеству критериев (редко используется).
-
-### 📊 Сводная таблица
-
-| Тип | Routing Key | Шаблоны | Использование |
-|-----|------------|---------|---------------|
-| Direct | Точное совпадение | Нет | Простая маршрутизация |
-| Fanout | Игнорируется | Нет | Broadcast всем |
-| Topic | Шаблон с `*` и `#` | Да | Гибкая маршрутизация |
-| Headers | По заголовкам | Нет | Сложные условия |
-
----
-
-## 6. Паттерны обмена сообщениями
-
-### 📤 1. Work Queue (Очередь задач)
-
-Один producer, несколько consumers. Каждое сообщение обрабатывается **только одним** consumer.
-
-```
-Producer → [Queue] → Consumer 1
-                   → Consumer 2
-                   → Consumer 3
-```
-
-**Случай использования:** Балансировка нагрузки при обработке задач (конвертация файлов, отправка писем).
-
-### 📡 2. Publish/Subscribe (Публикация/Подписка)
-
-Один producer публикует событие — **все** подписчики его получают.
-
-```
-Producer → [Fanout Exchange] → Queue 1 → Consumer 1
-                             → Queue 2 → Consumer 2
-                             → Queue 3 → Consumer 3
-```
-
-**Случай использования:** Событие "новый пользователь зарегистрировался" → email-сервис, аналитика, CRM.
-
-### 🔄 3. Request/Reply (Запрос/Ответ)
-
-Producer отправляет запрос и ждёт ответ (асинхронный RPC).
-
-```
-Client → [request_queue] → Server
-Client ← [reply_queue]   ← Server
-```
-
-### 🪣 4. Dead Letter Queue (Очередь мёртвых писем)
-
-Сообщения, которые не удалось обработать, перекладываются в специальную очередь для анализа.
-
-```
-[Main Queue] → Consumer (ошибка или TTL истёк) → [Dead Letter Exchange] → [DLQ]
-```
-
----
-
-## 7. Установка RabbitMQ
-
-### 🐳 Способ 1: Docker (Рекомендуется!)
-
-Это самый простой способ. Убедись, что Docker установлен.
-
-```bash
-# Запуск RabbitMQ с веб-интерфейсом управления
-docker run -d \
-  --name rabbitmq \
-  -p 5672:5672 \
-  -p 15672:15672 \
-  rabbitmq:3-management
-```
-
-После запуска:
-- **AMQP порт:** `localhost:5672` (для приложений)
-- **Веб-интерфейс:** `http://localhost:15672`
-- **Логин/пароль по умолчанию:** `guest` / `guest`
-
-### 💻 Способ 2: Установка на Windows
-
-1. Установи **Erlang** (язык, на котором написан RabbitMQ): https://www.erlang.org/downloads
-2. Скачай RabbitMQ installer: https://www.rabbitmq.com/install-windows.html
-3. Запусти установщик
-4. Включи веб-плагин: `rabbitmq-plugins enable rabbitmq_management`
-
-### 🌐 Веб-интерфейс Management UI
-
-После запуска открой `http://localhost:15672`:
-
-```
-┌─────────────────────────────────┐
-│     RabbitMQ Management         │
-│                                 │
-│  Overview | Connections | ...   │
-│  ─────────────────────────────  │
-│  Queues: 3  Messages: 125       │
-│  Consumers: 5  Rate: 12 msg/s   │
-└─────────────────────────────────┘
-```
-
-Здесь можно:
-- 👀 Просматривать очереди и сообщения
-- 📊 Смотреть статистику
-- 🔧 Создавать/удалять очереди и exchanges
-- 📨 Вручную публиковать сообщения для тестирования
-
----
-
-## 8. Spring Boot + RabbitMQ: Полная интеграция
-
-### 📦 Шаг 1: Создание проекта и зависимости
-
-Создай Spring Boot проект. В `pom.xml` добавь зависимость:
-
-```xml
-<dependencies>
-    <!-- Spring Boot Starter для RabbitMQ -->
-    <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-amqp</artifactId>
-    </dependency>
-    
-    <!-- Для веб-части (если нужен REST контроллер) -->
-    <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-web</artifactId>
-    </dependency>
-    
-    <!-- Lombok для удобства (опционально) -->
-    <dependency>
-        <groupId>org.projectlombok</groupId>
-        <artifactId>lombok</artifactId>
-        <optional>true</optional>
-    </dependency>
-    
-    <!-- Для Jackson (сериализация объектов в JSON) -->
-    <dependency>
-        <groupId>com.fasterxml.jackson.core</groupId>
-        <artifactId>jackson-databind</artifactId>
-    </dependency>
-</dependencies>
-```
-
-### ⚙️ Шаг 2: Настройка application.properties
-
-```properties
-# Подключение к RabbitMQ
-spring.rabbitmq.host=localhost
-spring.rabbitmq.port=5672
-spring.rabbitmq.username=guest
-spring.rabbitmq.password=guest
-spring.rabbitmq.virtual-host=/
-
-# Настройки для listener (потребителя)
-spring.rabbitmq.listener.simple.acknowledge-mode=manual
-spring.rabbitmq.listener.simple.prefetch=10
-
-# Для удобства логирования
-logging.level.org.springframework.amqp=DEBUG
-```
-
-Или `application.yml`:
+**В вашем проекте:**
 
 ```yaml
-spring:
-  rabbitmq:
-    host: localhost
-    port: 5672
-    username: guest
-    password: guest
-    virtual-host: /
-    listener:
-      simple:
-        acknowledge-mode: manual
-        prefetch: 10
+messaging-config:
+  exchangeName: image.processing.exchange  # ← Это Exchange
+  routingKey: thumbnail.create              # ← Это Routing Key
 ```
 
-### 🔧 Шаг 3: Конфигурация (RabbitMQ Config)
-
-Создаём конфигурационный класс, который объявляет Exchange, Queue и Binding:
+Exchange создаётся в конфигурации:
 
 ```java
-package com.example.rabbitmqdemo.config;
-
-import org.springframework.amqp.core.*;
-import org.springframework.amqp.rabbit.connection.ConnectionFactory;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
-import org.springframework.amqp.support.converter.MessageConverter;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-
-@Configuration
-public class RabbitMQConfig {
-
-    // ============================================================
-    // 1. Константы — имена очередей, обменников, ключей маршрутизации
-    // ============================================================
-    
-    public static final String QUEUE_NAME = "order.queue";
-    public static final String EXCHANGE_NAME = "order.exchange";
-    public static final String ROUTING_KEY = "order.created";
-    
-    // Dead Letter Queue (для сообщений с ошибками)
-    public static final String DLQ_NAME = "order.dlq";
-    public static final String DLQ_EXCHANGE = "order.dlx";
-    public static final String DLQ_ROUTING_KEY = "order.dead";
-
-    // ============================================================
-    // 2. Объявление Queue (очереди)
-    // ============================================================
-    
-    @Bean
-    public Queue orderQueue() {
-        return QueueBuilder.durable(QUEUE_NAME)        // durable = сохраняется при перезапуске
-            .withArgument("x-dead-letter-exchange", DLQ_EXCHANGE)      // DLX настройка
-            .withArgument("x-dead-letter-routing-key", DLQ_ROUTING_KEY) // DLX ключ
-            .withArgument("x-message-ttl", 60000)     // TTL: сообщение живёт 60 секунд
-            .build();
-    }
-    
-    // Dead Letter Queue
-    @Bean
-    public Queue deadLetterQueue() {
-        return QueueBuilder.durable(DLQ_NAME).build();
-    }
-
-    // ============================================================
-    // 3. Объявление Exchange (обменника)
-    // ============================================================
-    
-    @Bean
-    public DirectExchange orderExchange() {
-        return ExchangeBuilder.directExchange(EXCHANGE_NAME)
-            .durable(true)  // сохраняется при перезапуске
-            .build();
-    }
-    
-    // Dead Letter Exchange
-    @Bean
-    public DirectExchange deadLetterExchange() {
-        return ExchangeBuilder.directExchange(DLQ_EXCHANGE).durable(true).build();
-    }
-
-    // ============================================================
-    // 4. Binding — связываем Queue с Exchange
-    // ============================================================
-    
-    @Bean
-    public Binding orderBinding(Queue orderQueue, DirectExchange orderExchange) {
-        return BindingBuilder
-            .bind(orderQueue)          // Очередь
-            .to(orderExchange)         // к Exchange
-            .with(ROUTING_KEY);        // по ключу маршрутизации
-    }
-    
-    @Bean
-    public Binding dlqBinding(Queue deadLetterQueue, DirectExchange deadLetterExchange) {
-        return BindingBuilder.bind(deadLetterQueue).to(deadLetterExchange).with(DLQ_ROUTING_KEY);
-    }
-
-    // ============================================================
-    // 5. MessageConverter — конвертируем Java объекты в JSON
-    // ============================================================
-    
-    @Bean
-    public MessageConverter jsonMessageConverter() {
-        return new Jackson2JsonMessageConverter();
-    }
-
-    // ============================================================
-    // 6. RabbitTemplate — основной инструмент для отправки сообщений
-    // ============================================================
-    
-    @Bean
-    public RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory) {
-        RabbitTemplate template = new RabbitTemplate(connectionFactory);
-        template.setMessageConverter(jsonMessageConverter()); // используем JSON
-        return template;
-    }
+@Bean
+public DirectExchange directExchange(MessagingProperties messagingProperties) {
+    return new DirectExchange(messagingProperties.getExchangeName());
 }
-```
-
-### 📤 Шаг 4: Producer (Отправитель сообщений)
-
-```java
-package com.example.rabbitmqdemo.producer;
-
-import com.example.rabbitmqdemo.config.RabbitMQConfig;
-import com.example.rabbitmqdemo.model.OrderEvent;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.stereotype.Service;
-
-@Slf4j
-@Service
-@RequiredArgsConstructor
-public class OrderProducer {
-
-    private final RabbitTemplate rabbitTemplate;
-
-    /**
-     * Отправляет событие о создании заказа в RabbitMQ.
-     * 
-     * @param orderEvent данные заказа
-     */
-    public void sendOrderCreatedEvent(OrderEvent orderEvent) {
-        log.info("📤 Отправляем сообщение: orderId={}", orderEvent.getOrderId());
-        
-        rabbitTemplate.convertAndSend(
-            RabbitMQConfig.EXCHANGE_NAME,  // В какой Exchange
-            RabbitMQConfig.ROUTING_KEY,    // С каким ключом маршрутизации
-            orderEvent                     // Само сообщение (сериализуется в JSON)
-        );
-        
-        log.info("✅ Сообщение успешно отправлено");
-    }
-    
-    /**
-     * Отправка с дополнительными заголовками
-     */
-    public void sendWithHeaders(OrderEvent orderEvent) {
-        rabbitTemplate.convertAndSend(
-            RabbitMQConfig.EXCHANGE_NAME,
-            RabbitMQConfig.ROUTING_KEY,
-            orderEvent,
-            message -> {
-                // Добавляем кастомные заголовки
-                message.getMessageProperties().setHeader("source", "web-app");
-                message.getMessageProperties().setHeader("version", "1.0");
-                message.getMessageProperties().setPriority(5);
-                return message;
-            }
-        );
-    }
-}
-```
-
-### 📦 Модель сообщения
-
-```java
-package com.example.rabbitmqdemo.model;
-
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
-import java.time.LocalDateTime;
-import java.util.List;
-
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-public class OrderEvent {
-    private String orderId;
-    private String customerId;
-    private String status;
-    private Double totalAmount;
-    private List<String> items;
-    private LocalDateTime createdAt;
-}
-```
-
-### 📥 Шаг 5: Consumer (Получатель сообщений)
-
-```java
-package com.example.rabbitmqdemo.consumer;
-
-import com.example.rabbitmqdemo.config.RabbitMQConfig;
-import com.example.rabbitmqdemo.model.OrderEvent;
-import com.rabbitmq.client.Channel;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.amqp.core.Message;
-import org.springframework.amqp.rabbit.annotation.RabbitListener;
-import org.springframework.stereotype.Service;
-
-import java.io.IOException;
-
-@Slf4j
-@Service
-public class OrderConsumer {
-
-    /**
-     * Простейший listener — автоматическое подтверждение.
-     * Spring сам десериализует JSON обратно в OrderEvent.
-     */
-    @RabbitListener(queues = RabbitMQConfig.QUEUE_NAME)
-    public void handleOrderEvent(OrderEvent orderEvent) {
-        log.info("📥 Получено сообщение: orderId={}, status={}",
-            orderEvent.getOrderId(), orderEvent.getStatus());
-        
-        // Твоя бизнес-логика здесь
-        processOrder(orderEvent);
-        
-        // ACK отправляется автоматически при успешном выходе из метода
-    }
-    
-    /**
-     * Listener с ручным подтверждением (Manual ACK).
-     * Используй, когда нужна полная надёжность.
-     */
-    @RabbitListener(queues = RabbitMQConfig.QUEUE_NAME, ackMode = "MANUAL")
-    public void handleWithManualAck(
-            OrderEvent orderEvent,
-            Message message,
-            Channel channel) throws IOException {
-        
-        long deliveryTag = message.getMessageProperties().getDeliveryTag();
-        
-        try {
-            log.info("📥 Обрабатываем orderId={}", orderEvent.getOrderId());
-            
-            processOrder(orderEvent);
-            
-            // ✅ Подтверждаем успешную обработку
-            // false = подтверждаем только это одно сообщение
-            channel.basicAck(deliveryTag, false);
-            log.info("✅ ACK отправлен для deliveryTag={}", deliveryTag);
-            
-        } catch (Exception e) {
-            log.error("❌ Ошибка при обработке orderId={}: {}", 
-                orderEvent.getOrderId(), e.getMessage());
-            
-            // ❌ Отклоняем сообщение
-            // deliveryTag - тег сообщения
-            // false - не группировать
-            // true - вернуть обратно в очередь (requeue)
-            // false вместо true - отправить в Dead Letter Queue
-            channel.basicNack(deliveryTag, false, false); // → в DLQ
-        }
-    }
-    
-    /**
-     * Batch listener — обрабатывает несколько сообщений за раз.
-     */
-    @RabbitListener(queues = RabbitMQConfig.QUEUE_NAME, containerFactory = "batchListenerFactory")
-    public void handleBatch(List<OrderEvent> orders) {
-        log.info("📦 Получен батч из {} заказов", orders.size());
-        orders.forEach(this::processOrder);
-    }
-
-    private void processOrder(OrderEvent orderEvent) {
-        // Имитируем обработку
-        log.info("⚙️ Обрабатываем заказ: {}", orderEvent.getOrderId());
-        // ... бизнес-логика
-    }
-}
-```
-
-### 🌐 Шаг 6: REST Controller для тестирования
-
-```java
-package com.example.rabbitmqdemo.controller;
-
-import com.example.rabbitmqdemo.model.OrderEvent;
-import com.example.rabbitmqdemo.producer.OrderProducer;
-import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-
-import java.time.LocalDateTime;
-import java.util.Arrays;
-import java.util.UUID;
-
-@RestController
-@RequestMapping("/api/orders")
-@RequiredArgsConstructor
-public class OrderController {
-
-    private final OrderProducer orderProducer;
-
-    @PostMapping
-    public ResponseEntity<String> createOrder(@RequestBody OrderEvent order) {
-        // Генерируем ID если не передан
-        if (order.getOrderId() == null) {
-            order.setOrderId(UUID.randomUUID().toString());
-        }
-        order.setCreatedAt(LocalDateTime.now());
-        order.setStatus("CREATED");
-        
-        // Отправляем в RabbitMQ
-        orderProducer.sendOrderCreatedEvent(order);
-        
-        return ResponseEntity.ok("Заказ " + order.getOrderId() + " принят в обработку!");
-    }
-    
-    @GetMapping("/test")
-    public ResponseEntity<String> sendTestMessage() {
-        OrderEvent testOrder = new OrderEvent(
-            UUID.randomUUID().toString(),
-            "customer-123",
-            "CREATED",
-            1500.0,
-            Arrays.asList("item1", "item2"),
-            LocalDateTime.now()
-        );
-        
-        orderProducer.sendOrderCreatedEvent(testOrder);
-        return ResponseEntity.ok("Тестовое сообщение отправлено!");
-    }
-}
-```
-
-### 🏁 Шаг 7: Главный класс приложения
-
-```java
-package com.example.rabbitmqdemo;
-
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-
-@SpringBootApplication
-public class RabbitMqDemoApplication {
-    public static void main(String[] args) {
-        SpringApplication.run(RabbitMqDemoApplication.class, args);
-    }
-}
-```
-
-### 📁 Структура проекта
-
-```
-src/main/java/com/example/rabbitmqdemo/
-├── RabbitMqDemoApplication.java     ← Точка входа
-├── config/
-│   └── RabbitMQConfig.java          ← Конфигурация Exchange/Queue/Binding
-├── model/
-│   └── OrderEvent.java              ← Модель сообщения
-├── producer/
-│   └── OrderProducer.java           ← Отправка сообщений
-├── consumer/
-│   └── OrderConsumer.java           ← Получение сообщений
-└── controller/
-    └── OrderController.java         ← REST API для тестирования
 ```
 
 ---
 
-## 9. Продвинутые темы
+### 4. **Queue (Очередь)**
 
-### 🔁 Retry (Повторная отправка при ошибке)
+Queue - это **ящик с сообщениями**, из которого потребитель берёт сообщения.
 
-Настройка автоматических повторов при ошибке обработки:
+```
+Producer ──→ Exchange ──→ [Queue] ──→ Consumer
+```
+
+**Что произойдёт в очереди:**
+- Сообщения приходят в очередь в порядке FIFO (First In, First Out)
+- Остаются в памяти (или на диске, если настроено)
+- Потребитель берёт сообщения по одному
+- После обработки сообщение удаляется
+
+**В вашем проекте:**
+
+```yaml
+messaging-config:
+  queueName: image.processing.queue  # ← Это Queue
+```
+
+Queue создаётся в конфигурации:
 
 ```java
-// В RabbitMQConfig.java добавляем:
-
 @Bean
-public SimpleRabbitListenerContainerFactory rabbitListenerContainerFactory(
-        ConnectionFactory connectionFactory,
-        MessageConverter jsonMessageConverter) {
-    
-    SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
-    factory.setConnectionFactory(connectionFactory);
-    factory.setMessageConverter(jsonMessageConverter);
-    
-    // Настройки retry
-    factory.setAdviceChain(
-        RetryInterceptorBuilder.stateless()
-            .maxAttempts(3)              // максимум 3 попытки
-            .backOffOptions(
-                1000,   // начальная задержка 1 сек
-                2.0,    // множитель (exponential backoff)
-                10000   // максимальная задержка 10 сек
-            )
-            .recoverer(new RejectAndDontRequeueRecoverer()) // после всех попыток → в DLQ
-            .build()
+public Queue queue(MessagingProperties messagingProperties) {
+    return new Queue(messagingProperties.getQueueName());
+}
+```
+
+---
+
+### 5. **Binding (Связь)**
+
+Binding - это **правило маршрутизации**, которое связывает Exchange и Queue.
+
+```
+Producer ──→ Exchange ── binding──→ Queue ──→ Consumer
+```
+
+**Что он делает:**
+- Говорит Exchange: "Когда придёт сообщение с RoutingKey='thumbnail.create', отправь его в Queue 'image.processing.queue'"
+
+**В вашем проекте:**
+
+```java
+@Bean
+public Binding binding(Queue queue, DirectExchange directExchange, 
+                       MessagingProperties messagingProperties) {
+    return BindingBuilder.bind(queue)
+            .to(directExchange)
+            .with(messagingProperties.getRoutingKey());
+}
+```
+
+---
+
+### 6. **Routing Key (Ключ маршрутизации)**
+
+Routing Key - это **адрес** сообщения, который помогает Exchange определить, в какую Queue отправить сообщение.
+
+**Аналогия:**
+- `Routing Key` = Адрес получателя на письме
+- `Exchange` = Почтовое отделение, которое читает адрес и отправляет письмо нужному ящику
+
+**В вашем проекте:**
+
+```yaml
+messaging-config:
+  routingKey: thumbnail.create
+```
+
+Producer отправляет с этим ключом:
+
+```java
+public void sendMessage(ThumbnailCreationRequest request) {
+    rabbitTemplate.convertAndSend(
+            messagingProperties.getExchangeName(),    // Exchange
+            messagingProperties.getRoutingKey(),      // Routing Key
+            request                                    // Сообщение
     );
-    
-    return factory;
-}
-```
-
-### 💾 Персистентность (Сохранение сообщений)
-
-Чтобы сообщения **не потерялись** при перезапуске RabbitMQ:
-
-1. **Queue должна быть `durable`** (уже есть в нашем конфиге)
-2. **Exchange должен быть `durable`** (уже есть)
-3. **Сообщения должны быть `persistent`:**
-
-```java
-rabbitTemplate.convertAndSend(exchange, routingKey, message, msg -> {
-    msg.getMessageProperties().setDeliveryMode(MessageDeliveryMode.PERSISTENT);
-    return msg;
-});
-```
-
-### 📊 Prefetch (Предварительная выборка)
-
-`prefetch` — сколько сообщений Consumer берёт заранее, не дожидаясь ACK:
-
-```properties
-# Каждый consumer берёт не более 5 сообщений одновременно
-spring.rabbitmq.listener.simple.prefetch=5
-```
-
-**Совет:** При тяжёлой обработке ставь `prefetch=1`, чтобы нагрузка равномерно распределялась между consumers.
-
-### 🎯 Fanout Exchange: Публикация событий
-
-```java
-// Config
-@Bean
-public FanoutExchange notificationExchange() {
-    return new FanoutExchange("notification.fanout");
-}
-
-@Bean
-public Queue emailQueue() { return new Queue("notification.email"); }
-
-@Bean
-public Queue smsQueue() { return new Queue("notification.sms"); }
-
-@Bean
-public Queue pushQueue() { return new Queue("notification.push"); }
-
-@Bean
-public Binding emailBinding() {
-    return BindingBuilder.bind(emailQueue()).to(notificationExchange());
-}
-@Bean
-public Binding smsBinding() {
-    return BindingBuilder.bind(smsQueue()).to(notificationExchange());
-}
-@Bean
-public Binding pushBinding() {
-    return BindingBuilder.bind(pushQueue()).to(notificationExchange());
-}
-
-// Producer — отправить всем
-rabbitTemplate.convertAndSend("notification.fanout", "", event);
-//                                                    ↑
-//                               routing key не нужен для Fanout
-```
-
-### 🌿 Topic Exchange: Гибкая маршрутизация
-
-```java
-// Config
-@Bean
-public TopicExchange orderTopicExchange() {
-    return new TopicExchange("order.topic");
-}
-
-// Binding: Европейские заказы
-@Bean
-public Binding europeBinding() {
-    return BindingBuilder.bind(europeQueue())
-        .to(orderTopicExchange())
-        .with("order.*.europe");  // order.created.europe, order.updated.europe...
-}
-
-// Binding: Все срочные заказы
-@Bean
-public Binding urgentBinding() {
-    return BindingBuilder.bind(urgentQueue())
-        .to(orderTopicExchange())
-        .with("order.urgent.#"); // order.urgent.europe, order.urgent.asia...
-}
-
-// Producer
-rabbitTemplate.convertAndSend("order.topic", "order.created.europe", event);
-// → попадёт в оба: europeQueue И urgentQueue (если ключ совпал с обоими)
-```
-
-### 🔒 Транзакции и надёжность
-
-```java
-// Publisher Confirms — RabbitMQ подтверждает получение сообщения
-@Bean
-public RabbitTemplate reliableRabbitTemplate(ConnectionFactory connectionFactory) {
-    RabbitTemplate template = new RabbitTemplate(connectionFactory);
-    template.setMessageConverter(jsonMessageConverter());
-    
-    // Включаем подтверждения от сервера
-    template.setConfirmCallback((correlationData, ack, cause) -> {
-        if (ack) {
-            log.info("✅ RabbitMQ подтвердил получение сообщения");
-        } else {
-            log.error("❌ RabbitMQ НЕ получил сообщение: {}", cause);
-            // Здесь можно повторить отправку или сохранить в БД
-        }
-    });
-    
-    // Returns — если сообщение не попало ни в одну очередь
-    template.setReturnsCallback(returned -> {
-        log.error("📭 Сообщение не доставлено ни в одну очередь: {}", 
-            returned.getRoutingKey());
-    });
-    
-    template.setMandatory(true); // Необходимо для returns
-    return template;
 }
 ```
 
 ---
 
-## 10. Типичные ошибки и их решения
+## Как работает RabbitMQ
 
-### ❌ Ошибка 1: Connection refused
+Полный процесс от A до Z:
 
-```
-com.rabbitmq.client.AlreadyClosedException: connection is already closed
-org.springframework.amqp.AmqpConnectException: java.net.ConnectException: Connection refused
-```
-
-**Причина:** RabbitMQ не запущен или неверный хост/порт.
-
-**Решение:**
-```bash
-# Проверь, запущен ли RabbitMQ
-docker ps | grep rabbitmq
-
-# Или запусти:
-docker start rabbitmq
-```
-
-### ❌ Ошибка 2: Сообщения теряются при перезапуске
-
-**Причина:** Queue или Exchange объявлены без `durable(true)`.
-
-**Решение:** Всегда используй `QueueBuilder.durable()` и `ExchangeBuilder.durable(true)`.
-
-### ❌ Ошибка 3: Infinite loop (бесконечный цикл обработки ошибок)
-
-**Причина:** Consumer кидает исключение → сообщение возвращается в очередь → Consumer снова его берёт → снова ошибка.
-
-**Решение:** Используй Dead Letter Queue и `channel.basicNack(deliveryTag, false, false)` (requeue=false).
-
-### ❌ Ошибка 4: ClassCastException при десериализации
+### Шаг за шагом:
 
 ```
-ClassCastException: LinkedHashMap cannot be cast to OrderEvent
+1. PRODUCER (приложение)
+   ↓
+   Создаёт объект ThumbnailCreationRequest
+   imagePath = "c:\image-demo\images\photo.jpg"
+   
+2. PRODUCER отправляет сообщение
+   ↓
+   rabbitTemplate.convertAndSend(
+       "image.processing.exchange",  // Exchange
+       "thumbnail.create",           // Routing Key
+       request                       // Сообщение (сериализуется в JSON)
+   )
+   
+3. RABBITMQ BROKER (сервер)
+   ↓
+   Получает сообщение на Exchange
+   "image.processing.exchange"
+   
+4. EXCHANGE получает сообщение
+   ↓
+   Читает Routing Key: "thumbnail.create"
+   Смотрит на Binding правила
+   Находит, что Binding говорит:
+   "RoutingKey='thumbnail.create' → Queue='image.processing.queue'"
+   
+5. EXCHANGE отправляет сообщение в Queue
+   ↓
+   Сообщение попадает в очередь
+   "image.processing.queue"
+   
+6. CONSUMER (приложение) слушает Queue
+   ↓
+   @RabbitListener(queues = "image.processing.queue")
+   public void processImage(ThumbnailCreationRequest request) {
+       // Обработка сообщения
+   }
+   
+7. RABBITMQ смотрит на очередь
+   ↓
+   Видит, что есть свободный Consumer
+   Отправляет ему сообщение из Queue
+   
+8. CONSUMER обрабатывает сообщение
+   ↓
+   Получает ThumbnailCreationRequest
+   Создаёт thumbnail из изображения
+   Сохраняет результат
+   
+9. CONSUMER подтверждает (ACK)
+   ↓
+   "Я обработал сообщение"
+   RabbitMQ удаляет сообщение из Queue
 ```
 
-**Причина:** Jackson не знает, в какой тип десериализовать.
+---
 
-**Решение:**
+## Типы Exchange
+
+В RabbitMQ есть разные типы Exchange, каждый с собственной логикой маршрутизации.
+
+### 1. **Direct Exchange** (Прямой обменник)
+
+**Логика:** Сообщение отправляется в Queue, чей Binding имеет точно такой же Routing Key.
+
+```
+Producer: routingKey = "thumbnail.create"
+    ↓
+Exchange (Direct): "Кто слушает routingKey='thumbnail.create'?"
+    ↓
+Binding: "Есть Queue 'image.processing.queue' слушает 'thumbnail.create'"
+    ↓
+Queue → Consumer
+```
+
+**Пример маршрутизации:**
+
+```
+routingKey="order.created" ──→ Queue="orders"      ✓
+routingKey="order.failed"  ──→ Queue="failed"      ✓
+routingKey="payment.done"  ──→ Queue="orders"      ✗ (не совпадает)
+```
+
+**Когда использовать:** Для простой 1:1 маршрутизации. В вашем проекте используется именно это.
+
+**В вашем коде:**
+
 ```java
-// Настрой Jackson2JsonMessageConverter с типовой информацией
+@Bean
+public DirectExchange directExchange(MessagingProperties messagingProperties) {
+    return new DirectExchange(messagingProperties.getExchangeName());
+}
+```
+
+---
+
+### 2. **Fanout Exchange** (Рассылка)
+
+**Логика:** Сообщение отправляется во ВСЕ Queue, привязанные к этому Exchange (Routing Key игнорируется).
+
+```
+Producer отправляет сообщение
+    ↓
+Exchange (Fanout): "Отправить это ВСЕМ!"
+    ↓
+Все привязанные Queue получают копию сообщения
+    ↓
+Все Consumer обрабатывают сообщение
+```
+
+**Пример:**
+
+```
+Издатель публикует пост
+    ↓
+Все подписчики получают уведомление:
+- Queue="user_feed_1"
+- Queue="user_feed_2"
+- Queue="notifications"
+- Queue="analytics"
+```
+
+**Когда использовать:** Когда нужна рассылка одного сообщения множеству получателей (notifications, broadcasts).
+
+---
+
+### 3. **Topic Exchange** (Тематический)
+
+**Логика:** Маршрутизация по паттерну Routing Key с поддержкой wildcards.
+
+```
+Wildcard patterns:
+* = один элемент
+# = любое количество элементов
+. = разделитель
+```
+
+**Примеры:**
+
+```
+Bindings:
+- Queue="errors",    routingKey="*.error"      (Все ошибки)
+- Queue="logs",      routingKey="order.*"      (Все ордера)
+- Queue="critical",  routingKey="#"            (Всё вообще)
+
+Messages:
+- routingKey="user.error"     → Queue="errors" ✓, Queue="critical" ✓
+- routingKey="order.created"  → Queue="logs" ✓, Queue="critical" ✓
+- routingKey="payment"        → Queue="critical" ✓
+```
+
+**Когда использовать:** Когда нужна гибкая фильтрация сообщений по паттернам (логирование, аналитика).
+
+---
+
+### 4. **Headers Exchange** (По заголовкам)
+
+**Логика:** Маршрутизация по заголовкам сообщения (metadata), а не по Routing Key.
+
+```
+Сообщение имеет заголовки:
+headers={
+  "type": "premium",
+  "region": "EU"
+}
+
+Exchange смотрит на заголовки и решает, в какую Queue его отправить
+```
+
+**Когда использовать:** Редко. Когда нужна сложная маршрутизация по множеству критериев.
+
+---
+
+## Ваш проект - практический пример
+
+Вот визуализация того, как RabbitMQ используется в вашем проекте:
+
+```
+АРХИТЕКТУРА ПРОЕКТА
+═══════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────┐
+│ PRODUCER (приложение для отправки)                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                               │
+│  ImageFileScanner                                           │
+│  ├─ Сканирует папку: c:\image-demo\images                 │
+│  └─ Находит изображение: photo.jpg                        │
+│       ↓                                                     │
+│  MessageSender                                              │
+│  ├─ Создаёт ThumbnailCreationRequest объект               │
+│  │  {                                                      │
+│  │    "imageFilePath": "c:\\image-demo\\images\\photo.jpg",│
+│  │    "thumbnailFilePath": "c:\\image-demo\\thumbnails\\..." │
+│  │  }                                                      │
+│  └─ Отправляет в RabbitMQ                                 │
+│                                                             │
+└──────────────────────────────────┬──────────────────────────┘
+                                   │
+                                   │ convertAndSend(
+                                   │   "image.processing.exchange",
+                                   │   "thumbnail.create",
+                                   │   request
+                                   │ )
+                                   │
+                                   ↓
+┌─────────────────────────────────────────────────────────────┐
+│ RABBITMQ SERVER (брокер)                                    │
+├─────────────────────────────────────────────────────────────┤
+│                                                               │
+│  Exchange: "image.processing.exchange"                     │
+│  Type: DirectExchange                                       │
+│  ├─ Получает сообщение с routingKey="thumbnail.create"    │
+│  ├─ Смотрит на Bindings                                    │
+│  └─ Находит: routingKey="thumbnail.create" → Queue="..."  │
+│                                               ↓           │
+│  Queue: "image.processing.queue"                          │
+│  ├─ Сообщение встаёт в очередь                           │
+│  ├─ Ждёт, пока Consumer возьмёт его                       │
+│  └─ [Сообщение 1] [Сообщение 2] [Сообщение 3] ← FIFO    │
+│                                                             │
+└──────────────────────────────────┬──────────────────────────┘
+                                   │
+                                   │ RabbitMQ отправляет
+                                   │ сообщение Consumer
+                                   │
+                                   ↓
+┌─────────────────────────────────────────────────────────────┐
+│ CONSUMER (приложение для обработки)                         │
+├─────────────────────────────────────────────────────────────┤
+│                                                               │
+│ MessageListener (@RabbitListener)                          │
+│ ├─ Слушает очередь: "image.processing.queue"             │
+│ ├─ Получает ThumbnailCreationRequest                      │
+│ ├─ Использует Thumbnailator для создания thumbnail      │
+│ │  (размер 200x200)                                        │
+│ ├─ Сохраняет результат:                                  │
+│ │  c:\image-demo\thumbnails\photo_thumb.jpg              │
+│ └─ Отправляет ACK (подтверждение обработки)              │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+РЕЗУЛЬТАТ:
+✓ Producer отправил сообщение (асинхронно, не ждал)
+✓ RabbitMQ доставил сообщение
+✓ Consumer обработал и создал thumbnail
+✓ Оба приложения независимы друг от друга
+```
+
+---
+
+## Архитектура сообщений
+
+### Сообщение: ThumbnailCreationRequest
+
+```java
+// Это то, что передаётся между Producer и Consumer
+
+public class ThumbnailCreationRequest {
+    private String imageFilePath;
+    private String thumbnailFilePath;
+}
+```
+
+### Сериализация
+
+Spring Boot автоматически конвертирует объект в JSON и обратно:
+
+```
+Java Object                JSON (в RabbitMQ)         Java Object
+─────────────              ──────────────────        ───────────
+{                          {                          {
+  imageFilePath:  ──────→  "imageFilePath": ────→    imageFilePath:
+  "photo.jpg"              "photo.jpg"               "photo.jpg"
+}                          }                         }
+
+
+MessageConverter (Jackson2JsonMessageConverter)
+Это класс отвечает за эту конвертацию
+```
+
+**В конфигурации:**
+
+```java
 @Bean
 public MessageConverter jsonMessageConverter() {
-    Jackson2JsonMessageConverter converter = new Jackson2JsonMessageConverter();
-    DefaultJackson2JavaTypeMapper typeMapper = new DefaultJackson2JavaTypeMapper();
-    typeMapper.setTrustedPackages("com.example.*");
-    converter.setJavaTypeMapper(typeMapper);
-    return converter;
+    ObjectMapper objectMapper = new ObjectMapper();
+    objectMapper.findAndRegisterModules();
+    objectMapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+    return new Jackson2JsonMessageConverter(objectMapper);
 }
 ```
 
-### ❌ Ошибка 5: Очередь не создаётся
-
-**Причина:** Конфигурационные бины не регистрируются или опечатка в имени.
-
-**Решение:** Убедись, что конфигурационный класс помечен `@Configuration` и бины помечены `@Bean`. Проверь через Management UI.
-
-### ⚠️ Частые антипаттерны
-
-| Антипаттерн | Проблема | Правильный подход |
-|-------------|---------|------------------|
-| Один Queue для всего | Смешивание разных типов сообщений | Отдельная очередь для каждого типа событий |
-| Нет DLQ | Потеря сообщений с ошибками | Всегда настраивай Dead Letter Queue |
-| Нет ACK | Потеря сообщений при краше consumer | Всегда подтверждай обработку |
-| Большие сообщения | Нагрузка на сеть и память | Храни данные в БД, передавай только ID |
-| Не логировать | Сложность отладки | Логируй messageId, orderId при получении/отправке |
-
 ---
 
-## 11. Сравнение с другими брокерами
+## Коды примеров
 
-| Характеристика | RabbitMQ | Apache Kafka | ActiveMQ |
-|---------------|---------|------------|---------|
-| **Протокол** | AMQP | Свой | AMQP, OpenWire |
-| **Маршрутизация** | Гибкая (Exchange/Binding) | По топикам | Очереди/Топики |
-| **Сохранение** | Временно (до ACK) | Долго (лог) | Временно |
-| **Скорость** | Очень высокая | Экстремально высокая | Высокая |
-| **Порядок** | FIFO в очереди | Гарантирован в партиции | FIFO |
-| **Сложность** | Средняя | Высокая | Низкая |
-| **Идеально для** | Task queues, RPC, routing | Event streaming, Big Data | Простые задачи |
+### Соответствие между компонентами
 
-### Когда выбирать RabbitMQ:
-- ✅ Нужна гибкая маршрутизация
-- ✅ Task queues (распределение задач)
-- ✅ Быстрое подтверждение доставки
-- ✅ Небольшие/средние нагрузки
+```
+КОМПОНЕНТ               МЕСТО В КОДЕ            НАЗНАЧЕНИЕ
+──────────────────────────────────────────────────────────────────
 
-### Когда выбирать Kafka:
-- ✅ Огромные объёмы данных (миллионы сообщений/сек)
-- ✅ Event sourcing (история событий важна)
-- ✅ Аналитика в реальном времени
+Exchange                RabbitMqConfiguration   Создание DirectExchange
+                        .directExchange()       "image.processing.exchange"
 
----
+Queue                   RabbitMqConfiguration   Создание Queue
+                        .queue()                "image.processing.queue"
 
-## 12. Итоговая шпаргалка
+Binding                 RabbitMqConfiguration   Связь между
+                        .binding()              Exchange и Queue
 
-### 🔑 Ключевые аннотации и классы
+Routing Key             application.yml         Правило маршрутизации
+                        messagingProperties     "thumbnail.create"
+                        .getRoutingKey()
+
+Producer                MessageSender           Отправка сообщений
+                        .sendMessage()          в Exchange
+
+Consumer                MessageListener         Получение сообщений
+                        .processImage()         из Queue
+                        @RabbitListener
+
+Message Converter       RabbitMqConfiguration   Конвертация
+                        .jsonMessageConverter() Object ↔ JSON
+
+RabbitTemplate          Внедряется Spring       Инструмент для
+                        автоматически          отправки сообщений
+```
+
+### Producer: Как отправить сообщение
 
 ```java
-// ===== КОНФИГУРАЦИЯ =====
-@Configuration              // Класс конфигурации
-@Bean Queue/Exchange/Binding // Объявление компонентов
+// ШАГ 1: Создать сообщение
+ThumbnailCreationRequest request = new ThumbnailCreationRequest();
+request.setImageFilePath("c:\\images\\photo.jpg");
+request.setThumbnailFilePath("c:\\thumbnails\\photo_thumb.jpg");
 
-// ===== PRODUCER =====
-RabbitTemplate              // Основной класс для отправки
-.convertAndSend(exchange, routingKey, object)  // Отправить объект
+// ШАГ 2: Отправить в RabbitMQ
+messageSender.sendMessage(request);
 
-// ===== CONSUMER =====
-@RabbitListener(queues = "my.queue")  // Подписка на очередь
-@RabbitListener(queues = "q", ackMode = "MANUAL")  // Ручной ACK
-
-channel.basicAck(tag, false)   // Подтвердить успех
-channel.basicNack(tag, false, false)  // Отклонить → DLQ
-channel.basicNack(tag, false, true)   // Отклонить → вернуть в очередь
-
-// ===== EXCHANGE BUILDER =====
-QueueBuilder.durable("name").build()
-ExchangeBuilder.directExchange("name").durable(true).build()
-BindingBuilder.bind(queue).to(exchange).with(routingKey)
+// ЧТО ПРОИЗОЙДЁТ:
+// 1. request будет сериализован в JSON
+// 2. Отправлен в Exchange "image.processing.exchange"
+// 3. С Routing Key "thumbnail.create"
+// 4. Exchange маршрутизирует в Queue "image.processing.queue"
+// 5. Сообщение ждёт Consumer
 ```
 
-### 🎯 Чеклист для продакшена
+### Consumer: Как получить сообщение
 
-- [ ] Queue и Exchange объявлены как `durable`
-- [ ] Сообщения отправляются как `PERSISTENT`
-- [ ] Настроена Dead Letter Queue (DLQ)
-- [ ] Consumer использует Manual ACK для важных операций
-- [ ] Настроен retry с exponential backoff
-- [ ] Prefetch настроен под нагрузку
-- [ ] Логирование messageId/correlationId
-- [ ] Мониторинг через Management UI или Prometheus
-- [ ] Пароль `guest` изменён на боевой
-
-### 📚 Полезные ресурсы
-
-- 🌐 [Официальная документация RabbitMQ](https://www.rabbitmq.com/documentation.html)
-- 🌐 [Spring AMQP Reference](https://docs.spring.io/spring-amqp/docs/current/reference/html/)
-- 🎓 [RabbitMQ Tutorials](https://www.rabbitmq.com/getstarted.html) — официальные туториалы на разных языках
-- 🐳 [RabbitMQ Docker Hub](https://hub.docker.com/_/rabbitmq)
-
----
-
-## 🚀 Быстрый старт: Минимальный рабочий пример
-
-Если хочешь быстро попробовать, вот минимальный код:
-
-**1. Запусти RabbitMQ:**
-```bash
-docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
-```
-
-**2. pom.xml:**
-```xml
-<dependency>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-amqp</artifactId>
-</dependency>
-```
-
-**3. application.properties:**
-```properties
-spring.rabbitmq.host=localhost
-```
-
-**4. Весь код в одном файле:**
 ```java
-@SpringBootApplication
-public class App implements CommandLineRunner {
+@Component
+public class MessageListener {
+    
+    // @RabbitListener - аннотация Spring для слушания очереди
+    @RabbitListener(queues = "${messaging-config.queueName}")
+    public void processImage(ThumbnailCreationRequest request) {
+        // ЧТО ПРОИЗОЙДЁТ:
+        // 1. RabbitMQ даст это сообщение Consumer
+        // 2. Spring десериализует JSON в ThumbnailCreationRequest
+        // 3. Вызовет этот метод с десериализованным объектом
+        
+        // ОБРАБОТКА:
+        String imagePath = request.getImageFilePath();
+        String thumbnailPath = request.getThumbnailFilePath();
+        
+        // Создание thumbnail
+        Thumbnails.of(new File(imagePath))
+                .size(200, 200)
+                .toFile(new File(thumbnailPath));
+        
+        // Метод автоматически отправит ACK в RabbitMQ
+        // Сообщение будет удалено из Queue
+    }
+}
+```
 
+### Конфигурация: Полная настройка
+
+```java
+@Configuration
+public class RabbitMqConfiguration {
+    
+    // 1. Создаём Exchange
     @Bean
-    Queue myQueue() { return new Queue("hello"); }
-
-    @Autowired
-    RabbitTemplate rabbit;
-
-    public static void main(String[] args) {
-        SpringApplication.run(App.class, args);
+    public DirectExchange directExchange(MessagingProperties props) {
+        // DirectExchange - получает Routing Key и маршрутизирует сообщение
+        return new DirectExchange(props.getExchangeName());
+        // Название: "image.processing.exchange"
     }
-
-    @Override
-    public void run(String... args) {
-        // Отправляем
-        rabbit.convertAndSend("hello", "Привет, RabbitMQ! 🐇");
-        System.out.println("Сообщение отправлено!");
+    
+    // 2. Создаём Queue
+    @Bean
+    public Queue queue(MessagingProperties props) {
+        // Queue - хранит сообщения
+        return new Queue(props.getQueueName());
+        // Название: "image.processing.queue"
     }
-
-    // Получаем
-    @RabbitListener(queues = "hello")
-    public void listen(String message) {
-        System.out.println("Получено: " + message);
+    
+    // 3. Связываем Exchange и Queue
+    @Bean
+    public Binding binding(Queue queue, DirectExchange exchange, 
+                          MessagingProperties props) {
+        // Binding - указывает Exchange какие сообщения в какую Queue отправлять
+        return BindingBuilder.bind(queue)
+                .to(exchange)
+                .with(props.getRoutingKey());
+        // Правило: routingKey="thumbnail.create" → Queue
+    }
+    
+    // 4. Конвертор JSON ↔ Object
+    @Bean
+    public MessageConverter jsonMessageConverter() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        // WRITE_DATES_AS_TIMESTAMPS = false означает:
+        // Даты не будут преобразованы в timestamp, а в строку ISO
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        return new Jackson2JsonMessageConverter(mapper);
     }
 }
 ```
 
-Запускаешь — видишь в консоли:
-```
-Сообщение отправлено!
-Получено: Привет, RabbitMQ! 🐇
+---
+
+## Бестпрактики и советы
+
+### 1. **Идемпотентность сообщений**
+
+**Проблема:** RabbitMQ может отправить одно сообщение несколько раз (в случае сбоев).
+
+**Решение:** Сделайте Consumer идемпотентным.
+
+```java
+// ❌ НЕПРАВИЛЬНО: Если сообщение придёт дважды, thumbnail создастся дважды
+@RabbitListener(queues = "image.processing.queue")
+public void processImage(ThumbnailCreationRequest request) {
+    Thumbnails.of(request.getImageFilePath())
+            .toFile(request.getThumbnailFilePath());
+}
+
+// ✅ ПРАВИЛЬНО: Проверяем, не создан ли уже
+@RabbitListener(queues = "image.processing.queue")
+public void processImage(ThumbnailCreationRequest request) {
+    File thumbnail = new File(request.getThumbnailFilePath());
+    if (!thumbnail.exists()) {
+        Thumbnails.of(request.getImageFilePath())
+                .toFile(thumbnail);
+    }
+}
 ```
 
-**Поздравляю — ты только что отправил своё первое сообщение через RabbitMQ! 🎉**
+---
+
+### 2. **Обработка ошибок**
+
+**Проблема:** Если Consumer выбросит исключение, что произойдёт с сообщением?
+
+**Решение:** Используйте try-catch и логирование.
+
+```java
+@RabbitListener(queues = "image.processing.queue")
+public void processImage(ThumbnailCreationRequest request) {
+    try {
+        // Обработка
+        Thumbnails.of(request.getImageFilePath())
+                .toFile(request.getThumbnailFilePath());
+    } catch (Exception e) {
+        // Логируем ошибку
+        logger.error("Failed to process image: " + request, e);
+        // RabbitMQ НЕ получит ACK и переотправит сообщение
+        // Или выбросьте exception, если хотите retry
+        throw new RuntimeException("Processing failed", e);
+    }
+}
+```
+
+---
+
+### 3. **Мониторинг RabbitMQ**
+
+RabbitMQ имеет встроенный веб-интерфейс для мониторинга:
+
+```
+URL: http://localhost:15672
+Username: guest
+Password: guest
+
+Там вы можете:
+- Видеть все Exchange и Queue
+- Смотреть количество сообщений в очереди
+- Видеть активных Consumer
+- Проверить статус соединений
+```
+
+**В вашем docker-compose.yml:**
+
+```yaml
+ports:
+  - 5672:5672      # AMQP порт (для реальных сообщений)
+  - 15672:15672    # Веб-интерфейс (Management Plugin)
+```
+
+---
+
+### 4. **Надёжность доставки**
+
+RabbitMQ гарантирует доставку сообщений, используя ACK (подтверждение):
+
+```
+Producer отправляет
+    ↓
+RabbitMQ сохраняет в памяти / на диске
+    ↓
+Consumer получает сообщение
+    ↓
+Consumer обрабатывает
+    ↓
+Consumer отправляет ACK (подтверждение)
+    ↓
+RabbitMQ удаляет сообщение из Queue
+
+Если Consumer упадёт ДО ACK:
+→ RabbitMQ вернёт сообщение в очередь
+→ Другой Consumer его обработает
+```
+
+---
+
+### 5. **Типы сообщений**
+
+Используйте разные Routing Key для разных типов задач:
+
+```yaml
+# application.yml
+messaging-config:
+  exchangeName: images.exchange
+  routingKeys:
+    - thumbnail.create
+    - thumbnail.resize
+    - thumbnail.delete
+```
+
+```java
+// Отправка разных типов
+messageSender.sendMessage(request, "thumbnail.create");
+messageSender.sendMessage(request, "thumbnail.resize");
+messageSender.sendMessage(request, "thumbnail.delete");
+
+// Consumer может слушать несколько очередей
+@RabbitListener(queues = "image.processing.queue")
+public void processImage(Message message) {
+    String routingKey = message.getMessageProperties().getReceivedRoutingKey();
+    
+    if ("thumbnail.create".equals(routingKey)) {
+        // Создание
+    } else if ("thumbnail.resize".equals(routingKey)) {
+        // Изменение размера
+    }
+}
+```
+
+---
+
+### 6. **Масштабирование Consumer**
+
+Преимущество RabbitMQ - вы можете запустить несколько Consumer:
+
+```
+ОДИН Queue → НЕСКОЛЬКО Consumer
+
+Queue: [Message1][Message2][Message3][Message4]
+          ↓          ↓          ↓          ↓
+      Consumer1  Consumer2  Consumer3  Consumer4
+
+RabbitMQ АВТОМАТИЧЕСКИ распределит сообщения!
+Каждый Consumer обработает одно сообщение в раз.
+```
+
+**Как это работает:**
+- Запустите `consumer` приложение несколько раз
+- Каждый экземпляр подключится к одной Queue
+- RabbitMQ автоматически распределит нагрузку
+
+---
+
+### 7. **Persisting Messages (Сохранение на диск)**
+
+По умолчанию RabbitMQ хранит сообщения в памяти. Если RabbitMQ упадёт, сообщения потеряются.
+
+**Решение:** Используйте Durable Queue:
+
+```java
+@Bean
+public Queue queue(MessagingProperties props) {
+    return new Queue(props.getQueueName(), true);  // true = durable
+    // теперь сообщения сохранятся на диск RabbitMQ
+}
+```
+
+**Также сделайте сообщения persistent:**
+
+```java
+public void sendMessage(ThumbnailCreationRequest request) {
+    rabbitTemplate.convertAndSend(
+            messagingProperties.getExchangeName(),
+            messagingProperties.getRoutingKey(),
+            request,
+            messagePostProcessor -> {
+                messagePostProcessor.getMessageProperties()
+                        .setDeliveryMode(MessageDeliveryMode.PERSISTENT);
+                return messagePostProcessor;
+            }
+    );
+}
+```
+
+---
+
+### 8. **TTL (Time To Live) - Время жизни сообщения**
+
+Можете задать, как долго сообщение может находиться в очереди:
+
+```java
+@Bean
+public Queue queue(MessagingProperties props) {
+    return QueueBuilder.durable(props.getQueueName())
+            .ttl(300000)  // 5 минут = 300000 мс
+            .build();
+    // Если сообщение 5 минут в очереди и никто его не взял - удалится
+}
+```
+
+---
+
+### 9. **Dead Letter Exchange (DLX) - Очередь для "мёртвых" сообщений**
+
+Если Consumer не может обработать сообщение, его можно отправить в DLX:
+
+```java
+@Bean
+public Queue deadLetterQueue() {
+    return new Queue("thumbnail.processing.dlq");
+}
+
+@Bean
+public DirectExchange deadLetterExchange() {
+    return new DirectExchange("thumbnail.processing.dlx");
+}
+
+@Bean
+public Binding deadLetterBinding(Queue deadLetterQueue, 
+                                  DirectExchange deadLetterExchange) {
+    return BindingBuilder.bind(deadLetterQueue)
+            .to(deadLetterExchange)
+            .with("rejected");
+}
+
+@Bean
+public Queue mainQueue() {
+    return QueueBuilder.durable("image.processing.queue")
+            .deadLetterExchange("thumbnail.processing.dlx")
+            .deadLetterRoutingKey("rejected")
+            .build();
+}
+```
+
+---
+
+### 10. **Мониторинг через логи**
+
+Добавьте логирование в Consumer:
+
+```java
+private static final Logger logger = LoggerFactory.getLogger(MessageListener.class);
+
+@RabbitListener(queues = "${messaging-config.queueName}")
+public void processImage(ThumbnailCreationRequest request) {
+    logger.info("Received message: {}", request);
+    try {
+        // Обработка
+        logger.info("Successfully processed: {}", request.getImageFilePath());
+    } catch (Exception e) {
+        logger.error("Failed to process: {}", request, e);
+    }
+}
+```
+
+---
+
+## Резюме: Основные концепции
+
+| Концепция | Что это | Аналогия |
+|-----------|--------|----------|
+| **Producer** | Отправитель сообщений | Отправитель письма |
+| **Consumer** | Получатель сообщений | Получатель письма |
+| **Exchange** | Маршрутизатор сообщений | Почтовое отделение |
+| **Queue** | Хранилище сообщений | Почтовый ящик |
+| **Binding** | Правило маршрутизации | Адрес на письме |
+| **Routing Key** | Ключ для маршрутизации | Индекс получателя |
+| **Message** | Сообщение | Письмо |
+| **ACK** | Подтверждение обработки | Квитанция о получении |
+
+---
+
+## Команды для работы с Docker
+
+```bash
+# Запустить RabbitMQ в Docker
+docker-compose up -d
+
+# Проверить статус
+docker-compose ps
+
+# Остановить RabbitMQ
+docker-compose down
+
+# Смотреть логи RabbitMQ
+docker-compose logs -f rabbitmq
+
+# Войти в контейнер
+docker exec -it rabbitmq bash
+
+# Проверить очереди через CLI
+docker exec -it rabbitmq rabbitmqctl list_queues
+
+# Проверить Exchange
+docker exec -it rabbitmq rabbitmqctl list_exchanges
+```
+
+---
+
+## Визуальная схема всего процесса
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         ПОЛНАЯ АРХИТЕКТУРА                      │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  СЛОЙ PRODUCER (Отправитель)                                    │
+│  ────────────────────────                                        │
+│  ImageFileScanner → ThumbnailCreationRequest                     │
+│                            ↓                                      │
+│                   MessageSender.sendMessage()                    │
+│                            ↓                                      │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │ СЛОЙ RABBITMQ (Брокер)                                  │   │
+│  ├──────────────────────────────────────────────────────────┤   │
+│  │                                                            │   │
+│  │  rabbitTemplate.convertAndSend(                           │   │
+│  │      "image.processing.exchange",                         │   │
+│  │      "thumbnail.create",                                  │   │
+│  │      request                                              │   │
+│  │  )                                                        │   │
+│  │        ↓                                                  │   │
+│  │  ┌───────────────────────────────────────────────┐       │   │
+│  │  │ EXCHANGE (Direct)                             │       │   │
+│  │  │ "image.processing.exchange"                   │       │   │
+│  │  │                                               │       │   │
+│  │  │ Получает: routingKey="thumbnail.create"      │       │   │
+│  │  │ Смотрит: есть ли Binding для этого ключа?   │       │   │
+│  │  └────────────┬────────────────────────────────┘       │   │
+│  │               │                                         │   │
+│  │               │ ДА! Binding связывает этот ключ      │   │
+│  │               │ с Queue                               │   │
+│  │               ↓                                        │   │
+│  │  ┌───────────────────────────────────────────────┐       │   │
+│  │  │ BINDING (Правило маршрутизации)               │       │   │
+│  │  │ routingKey="thumbnail.create"                 │       │   │
+│  │  │       ↓                                        │       │   │
+│  │  │ Queue="image.processing.queue"                │       │   │
+│  │  └────────────┬────────────────────────────────┘       │   │
+│  │               │                                         │   │
+│  │               │ Отправляем сюда                       │   │
+│  │               ↓                                        │   │
+│  │  ┌───────────────────────────────────────────────┐       │   │
+│  │  │ QUEUE (Очередь)                               │       │   │
+│  │  │ "image.processing.queue"                      │       │   │
+│  │  │                                               │       │   │
+│  │  │ [Message1 JSON][Message2 JSON] ← FIFO        │       │   │
+│  │  │                                               │       │   │
+│  │  │ Consumer слушает эту очередь...               │       │   │
+│  │  └────────────┬────────────────────────────────┘       │   │
+│  │               │                                         │   │
+│  └───────────────┼─────────────────────────────────────────┘   │
+│                  │                                               │
+│                  │ RabbitMQ даёт сообщение Consumer           │
+│                  ↓                                               │
+│  СЛОЙ CONSUMER (Получатель)                                     │
+│  ─────────────────────────                                      │
+│  MessageListener                                                │
+│      @RabbitListener(queues="image.processing.queue")           │
+│      public void processImage(ThumbnailCreationRequest request)  │
+│      {                                                           │
+│          // Spring десериализует JSON → Object                 │
+│          //                                                     │
+│          // Обработка:                                         │
+│          // 1. Читаем imagePath                                │
+│          // 2. Создаём thumbnail через Thumbnailator         │
+│          // 3. Сохраняем в thumbnailPath                      │
+│          // 4. АВТОМАТИЧЕСКИ отправляем ACK                  │
+│      }                                                          │
+│                                                                   │
+│  ACK (Подтверждение) отправляется обратно в RabbitMQ           │
+│      ↓                                                            │
+│  RabbitMQ: "ОК, сообщение обработано, удаляю из очереди"       │
+│                                                                   │
+└─────────────────────────────────────────────────────────────────┘
+
+РЕЗУЛЬТАТ: Быстрая, надёжная, асинхронная обработка сообщений! ✓
+```
+
+---
+
+## Заключение
+
+**RabbitMQ - это мощный инструмент для:**
+- ✅ Развязывания приложений
+- ✅ Асинхронной обработки задач
+- ✅ Масштабирования систем
+- ✅ Гарантирования доставки сообщений
+- ✅ Разделения ответственности между компонентами
+
+**В вашем проекте:**
+- Producer сканирует папку с изображениями
+- Отправляет сообщения в RabbitMQ
+- Consumer получает сообщения и обрабатывает
+- Оба приложения работают независимо
+
+**Это классический паттерн обработки данных в масштабируемых системах!**
+
+---
+
+**Создано для обучения. Версия 1.0**
 
